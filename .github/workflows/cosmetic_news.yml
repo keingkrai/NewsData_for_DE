@@ -5,6 +5,9 @@ on:
     - cron: "0 */4 * * *"   # รันทุก 4 ชั่วโมง (เวลา UTC) ปรับได้ตามต้องการ
   workflow_dispatch: {}       # กดรันเองจากหน้า Actions ได้ด้วย
 
+permissions:
+  contents: write   # จำเป็นสำหรับ commit/push กลับเข้า repo
+
 jobs:
   fetch-news:
     runs-on: ubuntu-latest
@@ -26,3 +29,19 @@ jobs:
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           NEWSDATA_API_KEY: ${{ secrets.NEWSDATA_API_KEY }}
         run: python main.py
+
+      # เขียน timestamp การรันล่าสุดลงไฟล์ แล้ว commit กลับเข้า repo
+      # เพื่อไม่ให้ scheduled workflow ถูก GitHub ปิดอัตโนมัติหลังไม่มี
+      # activity เกิน 60 วัน (ที่นี่จะมี commit ทุก 4 ชม. อยู่แล้ว จึงไม่มีทาง
+      # โดนปิด) และยังใช้เป็น log เช็คได้ว่า pipeline รันสำเร็จล่าสุดเมื่อไหร่
+      - name: Update last-run timestamp
+        run: |
+          echo "Last run: $(date -u +"%Y-%m-%dT%H:%M:%SZ")" > last_run.txt
+
+      - name: Commit and push last-run file
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add last_run.txt
+          git diff --cached --quiet || git commit -m "chore: update last run timestamp [skip ci]"
+          git push
