@@ -1,0 +1,28 @@
+name: Cosmetic News Aggregator
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"   # รันทุก 4 ชั่วโมง (เวลา UTC) ปรับได้ตามต้องการ
+  workflow_dispatch: {}       # กดรันเองจากหน้า Actions ได้ด้วย
+
+jobs:
+  fetch-news:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install feedparser requests gspread google-auth
+
+      - name: Run news aggregator
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          NEWSDATA_API_KEY: ${{ secrets.NEWSDATA_API_KEY }}
+        run: python main.py
