@@ -53,6 +53,7 @@ import feedparser
 import gspread
 import requests
 from google.oauth2.service_account import Credentials
+from gspread.utils import rowcol_to_a1
 
 from customers import CUSTOMER_TH, CUSTOMER_EN, RETAILER_TH, RETAILER_EN
 
@@ -171,13 +172,29 @@ def get_worksheet():
 
 
 def ensure_header(ws) -> None:
-    """ใส่หัวคอลัมน์ถ้าชีตว่าง / เติมคอลัมน์ที่ยังไม่มี (เช่น category สำหรับชีตเดิม)
-    เติมต่อท้ายเสมอ ไม่ขยับข้อมูลเดิม"""
+    """ทำให้ row 1 เป็นหัวคอลัมน์ที่ถูกต้องเสมอ
+    - ชีตว่าง → ใส่หัวคอลัมน์
+    - row 1 เป็นข้อมูล (ไม่ใช่หัวคอลัมน์) → ล้างคำหัวคอลัมน์ที่หลงอยู่ท้ายแถว
+      (จาก bug เดิม) แล้วแทรก row หัวคอลัมน์จริงไว้ข้างบน
+    - row 1 เป็นหัวคอลัมน์อยู่แล้วแต่ขาดบางคอลัมน์ (เช่น category) → เติมต่อท้าย"""
     values = ws.get_all_values()
     if not values:
-        ws.append_row(SHEET_HEADER)
+        ws.append_row(list(SHEET_HEADER))
         return
+
     header = values[0]
+    # นับว่าชื่อคอลัมน์ตรงตำแหน่งที่ควรจะเป็นกี่ช่อง (header จริงจะตรงหลายช่อง
+    # ส่วน row ข้อมูลที่มีคำหัวคอลัมน์หลงมาต่อท้ายจะตรง 0 ช่อง)
+    aligned = sum(1 for i, col in enumerate(SHEET_HEADER) if i < len(header) and header[i] == col)
+
+    if aligned < 3:  # row 1 ไม่ใช่หัวคอลัมน์ = เป็นข้อมูล
+        junk = [i for i, v in enumerate(header) if v in SHEET_HEADER]
+        if junk:  # ล้าง cell ที่ bug เดิมเขียนชื่อคอลัมน์ทับไว้ (เช่น G1:M1)
+            rng = f"{rowcol_to_a1(1, junk[0] + 1)}:{rowcol_to_a1(1, junk[-1] + 1)}"
+            ws.batch_clear([rng])
+        ws.insert_row(list(SHEET_HEADER), index=1)
+        return
+
     next_col = len(header) + 1
     for col in SHEET_HEADER:
         if col not in header:
