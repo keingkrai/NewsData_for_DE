@@ -28,6 +28,7 @@ jobs:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           NEWSDATA_API_KEY: ${{ secrets.NEWSDATA_API_KEY }}
+          TYPHOON_API_KEY: ${{ secrets.TYPHOON_API_KEY }}
         run: python main.py
 
       # เขียน timestamp การรันล่าสุดลงไฟล์ แล้ว commit กลับเข้า repo

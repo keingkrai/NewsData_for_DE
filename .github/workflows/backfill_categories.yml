@@ -1,0 +1,37 @@
+name: Backfill Categories (one-time)
+
+# จัดหมวด category ให้แถวข่าวเก่าที่มีอยู่แล้วในชีต — กดรันเองจากหน้า Actions
+on:
+  workflow_dispatch:
+    inputs:
+      reclassify_all:
+        description: "จัดหมวดใหม่ทุกแถว (เขียนทับค่าเดิม) — ไม่ติ๊ก = เฉพาะแถวที่ยังว่าง"
+        type: boolean
+        default: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install feedparser requests gspread google-auth
+
+      - name: Run backfill
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          TYPHOON_API_KEY: ${{ secrets.TYPHOON_API_KEY }}
+        run: |
+          if [ "${{ inputs.reclassify_all }}" = "true" ]; then
+            python backfill_categories.py --all
+          else
+            python backfill_categories.py
+          fi
