@@ -44,6 +44,7 @@ Setup ที่ต้องทำครั้งเดียว (ฝั่งค
 import json
 import os
 import re
+import sys
 import time
 from datetime import datetime, timezone
 from urllib.parse import urlencode
@@ -54,6 +55,13 @@ import requests
 from google.oauth2.service_account import Credentials
 
 from customers import CUSTOMER_TH, CUSTOMER_EN, RETAILER_TH, RETAILER_EN
+
+# กัน UnicodeEncodeError เวลารัน local บน Windows (console เป็น cp874)
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 
 def _load_dotenv(path: str = ".env") -> None:
@@ -248,15 +256,42 @@ def _classify_by_keyword(article: dict) -> str:
     return "uncategorized"
 
 
+CLASSIFY_DEBUG = os.environ.get("CLASSIFY_DEBUG", "").lower() in ("1", "true", "yes")
+
+ALL_CATEGORIES = ("direct_customer", "channel_retailer", "trend_innovation", "industry_market", "uncategorized")
+
+
+def _canon_category(raw: str) -> str:
+    """map คำตอบของโมเดลให้เป็น key มาตรฐาน (โมเดลอาจตอบ Thai / เว้นวรรค / ขีดกลาง)"""
+    r = str(raw or "").strip().lower().replace("-", "_").replace(" ", "_")
+    for key in ALL_CATEGORIES:
+        if key in r:
+            return key
+    if "ลูกค้า" in r:
+        return "direct_customer"
+    if "ช่องทาง" in r or "รีเทล" in r or "ค้าปลีก" in r or "retail" in r or "channel" in r:
+        return "channel_retailer"
+    if "นวัตกรรม" in r or "สารสกัด" in r or "เทรนด์" in r or "trend" in r or "innovation" in r:
+        return "trend_innovation"
+    if "อุตสาหกรรม" in r or "ตลาด" in r or "market" in r or "industry" in r:
+        return "industry_market"
+    return ""
+
+
 def _extract_json_array(s: str):
-    start = s.find("[")
-    end = s.rfind("]")
-    if start == -1 or end == -1 or end < start:
-        return None
-    try:
-        return json.loads(s[start:end + 1])
-    except json.JSONDecodeError:
-        return None
+    m = re.search(r"\[\s*\{.*\}\s*\]", s, re.DOTALL)  # จาก [{ ตัวแรก ถึง }] ตัวสุดท้าย
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            pass
+    start, end = s.find("["), s.rfind("]")
+    if 0 <= start < end:
+        try:
+            return json.loads(s[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+    return None
 
 
 def _typhoon_classify_batch(batch: list) -> list:
@@ -273,7 +308,7 @@ def _typhoon_classify_batch(batch: list) -> list:
             )},
         ],
         "temperature": 0.2,
-        "max_tokens": 700,
+        "max_tokens": 1500,
         "repetition_penalty": 1.05,
         "stream": False,
     }
@@ -282,21 +317,23 @@ def _typhoon_classify_batch(batch: list) -> list:
     last_err = None
     for attempt in range(3):
         try:
-            resp = requests.post(TYPHOON_ENDPOINT, json=payload, headers=headers, timeout=60)
+            resp = requests.post(TYPHOON_ENDPOINT, json=payload, headers=headers, timeout=90)
             if resp.status_code in (429, 500, 502, 503, 504):
                 last_err = f"HTTP {resp.status_code}"
                 time.sleep(2 ** attempt)
                 continue
             resp.raise_for_status()
             content = resp.json()["choices"][0]["message"]["content"]
+            if CLASSIFY_DEBUG:
+                print(f"  [debug] Typhoon ตอบ: {content[:400]!r}")
             parsed = _extract_json_array(content)
             if not parsed:
-                raise ValueError("อ่าน JSON จากคำตอบไม่ได้")
+                raise ValueError(f"อ่าน JSON ไม่ได้ — คำตอบขึ้นต้น: {content[:200]!r}")
 
             by_id = {}
             for item in parsed:
                 try:
-                    by_id[int(item["id"])] = str(item.get("category", "")).strip()
+                    by_id[int(item["id"])] = _canon_category(item.get("category", ""))
                 except (KeyError, ValueError, TypeError):
                     continue
 
@@ -317,6 +354,7 @@ def _classify_with_model(articles: list) -> list:
     if not articles:
         return []
     if not TYPHOON_API_KEY:
+        print(f"[เตือน] ไม่พบ TYPHOON_API_KEY — จัดหมวด {len(articles)} ข่าวด้วย keyword ล้วน (แม่นยำต่ำ)")
         return [_classify_by_keyword(a) for a in articles]
 
     out = []
@@ -345,6 +383,11 @@ def classify_articles(articles: list) -> list:
 
     for idx, cat in zip(pending_idx, _classify_with_model(pending)):
         results[idx] = cat
+
+    from collections import Counter
+    dist = ", ".join(f"{k}={v}" for k, v in sorted(Counter(results).items()))
+    matched = len(articles) - len(pending)
+    print(f"จัดหมวด {len(articles)} ข่าว (จับชื่อลูกค้า/รีเทลเลอร์ได้ {matched}) -> {dist}")
 
     return results
 

@@ -75,7 +75,7 @@ def main() -> None:
             time.sleep(1)
         ws.batch_update(updates[i:i + WRITE_CHUNK], value_input_option="RAW")
 
-    print("เสร็จแล้ว —", dict(Counter(categories)))
+    print("เสร็จแล้ว:", dict(Counter(categories)))
 
 
 if __name__ == "__main__":
